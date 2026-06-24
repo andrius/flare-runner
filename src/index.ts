@@ -61,7 +61,8 @@ export default {
     const body = JSON.parse(raw) as WorkflowJobEvent;
 
     if (!shouldSpawn(request.headers.get("x-github-event"), body, labels)) {
-      return new Response("ignored", { status: 204 });
+      // 204 must have a null body (Workers runtime throws otherwise).
+      return new Response(null, { status: 204 });
     }
 
     // Unique name per job id => a fresh container instance, and idempotent if
