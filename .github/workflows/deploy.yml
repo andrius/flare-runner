@@ -1,0 +1,33 @@
+name: deploy
+
+# Deploy the Worker + Container to Cloudflare. `wrangler deploy` builds ./Dockerfile
+# (linux/amd64) and pushes it to the Cloudflare registry, so this needs Docker
+# (ubuntu-latest has it) and a token with Workers + Containers permissions.
+# Manual by design - each org deploys to its own account.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Deploy worker + container
+        run: npx wrangler deploy
+
+      - name: Sync worker secrets
+        run: |
+          printf '%s' "${{ secrets.GH_RUNNER_PAT }}"  | npx wrangler secret put GITHUB_TOKEN
+          printf '%s' "${{ secrets.WEBHOOK_SECRET }}" | npx wrangler secret put WEBHOOK_SECRET

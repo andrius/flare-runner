@@ -1,0 +1,47 @@
+name: runner-version
+
+# Discover the latest GitHub Actions runner release and, if newer than the pin in
+# the Dockerfile, open a PR bumping it. Merging the PR triggers build-push.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest runner vs current pin
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api repos/actions/runner/releases/latest --jq .tag_name | sed 's/^v//')
+          current=$(grep -oP 'ARG RUNNER_VERSION=\K.*' Dockerfile)
+          echo "latest=$latest"   >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "runner: current=$current latest=$latest"
+
+      - name: Bump Dockerfile + open PR
+        if: steps.v.outputs.latest != steps.v.outputs.current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.v.outputs.latest }}
+        run: |
+          sed -i -E "s/^ARG RUNNER_VERSION=.*/ARG RUNNER_VERSION=${LATEST}/" Dockerfile
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="chore/runner-${LATEST}"
+          git checkout -b "$branch"
+          git commit -am "chore: bump GitHub Actions runner to v${LATEST}"
+          git push -fu origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore: bump runner to v${LATEST}" \
+            --body "Automated bump of the actions runner pin in the Dockerfile. Merging triggers build-push." \
+            || echo "PR already exists for $branch"

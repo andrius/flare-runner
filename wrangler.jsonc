@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flare-runner",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Non-secret config. Secrets (GITHUB_TOKEN, WEBHOOK_SECRET) are set with
+  // `wrangler secret put` (see setup.md), never committed.
+  //
+  // Set exactly one scope:
+  //   GITHUB_REPO "owner/repo"  - repo-scoped runners (works for user repos)
+  //   GITHUB_ORG  "your-org"    - org-scoped runners (needs org admin)
+  // This repo deploys itself as its own demo, so it points at GITHUB_REPO.
+  "vars": {
+    "GITHUB_REPO": "andrius/flare-runner",
+    "RUNNER_GROUP_ID": "1",
+    "RUNNER_LABELS": "self-hosted,cloudflare"
+  },
+
+  // `wrangler deploy` builds ./Dockerfile (linux/amd64) and pushes it. class_name
+  // must match the Durable Object class below. standard-2 = 1 vCPU / 6 GiB / 12 GB.
+  "containers": [
+    {
+      "class_name": "RunnerContainer",
+      "image": "./Dockerfile",
+      "max_instances": 5,
+      "instance_type": "standard-2"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "class_name": "RunnerContainer", "name": "RUNNER" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RunnerContainer"] }]
+
+  // Per-org reuse: copy this file, change `name` + `GITHUB_ORG` (+ RUNNER_GROUP_ID),
+  // or add an "env": { "another-org": { ... } } block and deploy with `--env`.
+}

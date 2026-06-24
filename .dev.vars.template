@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `wrangler dev` (gitignored). In production set these with
+# `wrangler secret put GITHUB_TOKEN` / `wrangler secret put WEBHOOK_SECRET`.
+
+# Fine-grained org PAT with "Self-hosted runners: read and write" (POC auth).
+GITHUB_TOKEN=
+
+# Shared secret you set on the GitHub org webhook (any high-entropy string).
+WEBHOOK_SECRET=

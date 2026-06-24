@@ -1,0 +1,46 @@
+name: demo
+
+# The proof: this job runs ON a flare-runner Cloudflare Container (ephemeral,
+# one-shot). Everything else in this repo runs on GitHub-hosted runners.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - demo/**
+      - .github/workflows/demo.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  on-cloudflare:
+    runs-on: [self-hosted, cloudflare]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Where am I (Cloudflare Container runner, no Docker daemon)
+        run: |
+          echo "runner=$RUNNER_NAME  os=$(uname -srm)"
+          docker info >/dev/null 2>&1 \
+            && echo "docker: present (unexpected)" \
+            || echo "docker: absent (expected - no DinD)"
+
+      - name: Run the tiny Python API and smoke /health
+        run: |
+          python3 demo/app.py &
+          pid=$!
+          sleep 2
+          curl -fsS http://localhost:8080/health; echo
+          kill "$pid"
+
+      - name: Build an image without Docker (buildah) and push to GHCR
+        # No-DinD showcase. continue-on-error because the buildah-in-sandbox path
+        # can need per-environment tuning; the steps above are the core proof.
+        continue-on-error: true
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u "${{ github.actor }}" --password-stdin ghcr.io
+          img="ghcr.io/${{ github.repository }}-demo:latest"
+          buildah bud --isolation chroot --storage-driver vfs -f demo/Dockerfile -t "$img" demo
+          buildah push --storage-driver vfs "$img"
+          echo "pushed $img"

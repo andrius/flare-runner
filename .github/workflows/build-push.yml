@@ -1,0 +1,44 @@
+name: build-push
+
+# Build the runner image and push it to GHCR for public distribution. (Cloudflare
+# itself builds the same Dockerfile to its own registry on `wrangler deploy`;
+# GHCR is for anyone who wants to pull/inspect the image.)
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - entrypoint.sh
+      - .github/workflows/build-push.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read runner version from Dockerfile
+        id: v
+        run: echo "version=$(grep -oP 'ARG RUNNER_VERSION=\K.*' Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
