@@ -3,3 +3,7 @@ node_modules/
 .dev.vars
 dist/
 *.log
+
+# Private per-org deploy configs (contain org names; not for the public template)
+wrangler.*.jsonc
+

@@ -20,6 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       buildah \
     && rm -rf /var/lib/apt/lists/*
 
+# buildah resolves short image names (e.g. "alpine:3", "node:22") to Docker Hub,
+# the way `docker build` does. Without this, `FROM alpine` fails with
+# "short-name did not resolve to an alias and no unqualified-search registries".
+RUN mkdir -p /etc/containers \
+    && printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf
+
 # The agent refuses to run as root, so create an unprivileged user.
 RUN useradd -m runner
 WORKDIR /home/runner/actions-runner
