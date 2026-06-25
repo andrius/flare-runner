@@ -14,9 +14,9 @@
     "@cloudflare/containers": "^0.3.7"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
-    "typescript": "^5.8.3",
-    "vitest": "^3.2.1",
-    "wrangler": "^4.98.0"
+    "@cloudflare/workers-types": "^4.20260625.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.104.0"
   }
 }
