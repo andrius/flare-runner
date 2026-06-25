@@ -17,7 +17,7 @@ jobs:
   on-cloudflare:
     runs-on: [self-hosted, cloudflare]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Where am I (Cloudflare Container runner, no Docker daemon)
         run: |

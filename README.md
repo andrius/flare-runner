@@ -5,12 +5,18 @@
 runs **one** job in just-in-time (JIT) mode and exits. No standing VM,
 scale-to-zero, per-second billing, one container = one job.
 
-```
-GitHub org ──workflow_job:queued (HMAC webhook)──▶ Worker
-   Worker: verify HMAC → filter (queued + matching labels)
-         → mint JIT runner config (GitHub API)
-         → start one Cloudflare Container
-   Container: ./run.sh --jitconfig …  → claims ONE job → runs → exits → reclaimed
+```mermaid
+flowchart LR
+    A["GitHub Actions<br/>(workflow_job: queued)"]
+    B["Cloudflare Worker<br/>verify HMAC + filter labels"]
+    C["GitHub API<br/>generate-jitconfig"]
+    D["Cloudflare Container<br/>(ephemeral runner)"]
+    E["run.sh --jitconfig:<br/>claim ONE job, run, exit, reclaim"]
+    A -- "HMAC webhook" --> B
+    B -- "mint JIT" --> C
+    C -- "encoded_jit_config" --> B
+    B -- "start one container" --> D
+    D --> E
 ```
 
 Three moving parts: a **Worker** (`src/index.ts`), a **Container Durable Object**
@@ -59,16 +65,16 @@ This repo deploys **itself** as its own demo, so it ships with `GITHUB_REPO`.
 
 GitHub-hosted (native runners):
 
-- `ci` - tests + typecheck on every push/PR.
-- `runner-version` - weekly; bumps the runner pin in the `Dockerfile` via PR.
-- `build-push` - builds the runner image and pushes it to
+- [`ci`](../../actions/workflows/ci.yml) - tests + typecheck on every push/PR.
+- [`runner-version`](../../actions/workflows/runner-version.yml) - weekly; bumps the runner pin in the `Dockerfile` via PR.
+- [`build-push`](../../actions/workflows/build-push.yml) - builds the runner image and pushes it to
   `ghcr.io/<owner>/flare-runner` (public distribution; Cloudflare builds the same
   Dockerfile to its own registry on deploy).
-- `deploy` - manual; `wrangler deploy` (Worker + container) and syncs worker secrets.
+- [`deploy`](../../actions/workflows/deploy.yml) - manual; `wrangler deploy` (Worker + container) and syncs worker secrets.
 
 On the flare-runner Cloudflare Container itself:
 
-- `demo` - the proof: runs a tiny Python API and builds an image with **buildah**
+- [`demo`](../../actions/workflows/demo.yml) - the proof: runs a tiny Python API and builds an image with **buildah**
   (no Docker daemon), then pushes it to GHCR.
 
 ## Cost note
