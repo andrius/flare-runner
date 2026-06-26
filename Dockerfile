@@ -6,6 +6,12 @@ FROM --platform=linux/amd64 ubuntu:24.04
 ARG RUNNER_VERSION=2.335.1
 ENV DEBIAN_FRONTEND=noninteractive
 
+# UTF-8 locale so Unicode-aware tooling behaves the same as on GitHub-hosted
+# runners. Without it the C locale makes `grep -P \p{L}`, ripgrep, perl, etc.
+# treat non-ASCII letters as non-letters, which silently breaks regexes over
+# accented / non-Latin source and content. C.UTF-8 needs no locale package.
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 # Base tools + system python3 (some jobs use the runner's python3 because
 # actions/setup-python has no prebuilt CPython for every runner OS). Go and Node
 # are NOT baked in - setup-go / setup-node install them at job time, keeping this
