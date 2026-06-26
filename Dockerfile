@@ -1,7 +1,7 @@
 # Ephemeral GitHub Actions runner for Cloudflare Containers. linux/amd64 only.
 # One container = one job: the entrypoint runs the agent in JIT mode, it claims a
 # single job, then the process exits and Cloudflare reclaims the instance.
-FROM --platform=linux/amd64 ubuntu:22.04
+FROM --platform=linux/amd64 ubuntu:24.04
 
 ARG RUNNER_VERSION=2.335.1
 ENV DEBIAN_FRONTEND=noninteractive
@@ -11,13 +11,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # are NOT baked in - setup-go / setup-node install them at job time, keeping this
 # lean. Add or drop toolchains here to match your jobs.
 # The agent's own native deps (libicu, etc.) come from installdependencies.sh below.
-# buildah lets a job build/push a container image with no Docker daemon
-# (rootless, `--isolation chroot --storage-driver vfs`). See the demo workflow.
+# buildah builds/pushes a container image with no Docker daemon (rootless,
+# `--isolation chroot --storage-driver vfs`). Ubuntu 24.04 ships buildah >=1.33,
+# which supports `--layers --cache-from/--cache-to <registry>` so image layers
+# can be cached across these ephemeral runs (see the build-cache demo workflow).
+# skopeo copies/retags images between registries without a daemon (cheap promote).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git jq unzip tar sudo \
       build-essential \
       python3 python3-venv python3-pip \
-      buildah \
+      buildah skopeo \
     && rm -rf /var/lib/apt/lists/*
 
 # buildah resolves short image names (e.g. "alpine:3", "node:22") to Docker Hub,

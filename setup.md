@@ -99,17 +99,68 @@ auto-remove around the job.
 ## Building images without Docker (when a job needs it)
 
 Cloudflare Containers can't run a Docker daemon. If a job must build/push a
-container image, swap `docker build` for a rootless, daemonless builder:
+container image, swap `docker build` for `buildah` (in this image's apt layer):
 
 ```yaml
+- run: echo "$REGISTRY_PASSWORD" | buildah login -u "$REGISTRY_USER" --password-stdin "$REGISTRY"
 - run: |
-    buildah bud -t "$REGISTRY/app:$GITHUB_SHA" .
-    buildah push "$REGISTRY/app:$GITHUB_SHA"
+    buildah build \
+      --layers --cache-from "$REGISTRY/app-cache" --cache-to "$REGISTRY/app-cache" \
+      --isolation chroot --storage-driver overlay \
+      -t "$REGISTRY/app:$GITHUB_SHA" .
+    buildah push --storage-driver overlay "$REGISTRY/app:$GITHUB_SHA"
 ```
 
-Add `buildah` (or kaniko) to the `Dockerfile`'s apt layer for that org's image.
-Heavy multi-image builds may be better left on a Docker-capable runner - the
-container disk ceiling is 20 GB (standard-4).
+Two settings make this work and stay fast:
+
+- **`--storage-driver overlay`**, not the default `vfs`. vfs copies the whole
+  filesystem per layer; a multi-stage build will hit "no space left on device"
+  on the 12-20 GB container disk. overlay is copy-on-write. (The Ubuntu 24.04
+  base ships buildah 1.33, which has `--cache-from`/`--cache-to`; 22.04's 1.23
+  does not.)
+- **`--layers --cache-from/--cache-to <repo>`** stores layers in the registry,
+  so a fresh container reuses them. Best for stable layers (`apt`, base images).
+
+For a **compiled language**, the registry layer cache does *not* help the
+`RUN go build` (or cargo/npm) layer - it's invalidated by every source change.
+Compile on the runner instead (with `actions/cache` on the build cache, see
+"Caching" below) and `buildah` only a thin runtime image. That keeps the
+compile fast and the image small.
+
+`skopeo` (also in the image) retags between registries with no pull:
+`skopeo copy --all docker://$REG/app:$SHA docker://$REG/app:prod`. Rootless
+skopeo needs `REGISTRY_AUTH_FILE` pointed at a writable path.
+
+## Concurrency and matrix size
+
+flare-runner spawns **one container per `workflow_job: queued` webhook**, and
+GitHub does **not** re-send that event. So total concurrent runners are bounded
+by two ceilings, and a job that can't get a container when its event fires will
+**starve** (sit `queued` forever - there's no retry):
+
+1. **`max_instances`** in the `containers` block. Set it `>=` the widest matrix
+   that queues at once. The default of 5 starves a 6th parallel job.
+2. **Your Cloudflare account's concurrent-container limit.** This caps real
+   concurrency regardless of `max_instances`. If your matrix is wider than this
+   limit, GitHub fires all the `queued` webhooks at once, only the first N get
+   containers, and the rest starve. `strategy.max-parallel` does **not** help -
+   it limits execution, not when the webhooks fire.
+
+Rule of thumb: a job count `<=` your CF concurrent-container limit is reliable.
+For wider matrices (e.g. a 16-image build), either raise the CF limit, keep that
+matrix on a GitHub-hosted runner, or add a reconciler that re-spawns runners for
+still-queued jobs. Single-job CI (test, lint, typecheck, one build) is always
+fine.
+
+## Caching on a fresh-every-time runner
+
+A one-shot runner starts with empty caches. Move them off the box:
+`actions/cache@v4` works over HTTPS, so cache the compiler/build caches and
+dependency stores by path (`~/.cache/go-build` + `~/go/pkg/mod`, `~/.npm` or the
+pnpm store, `~/.cache/pip`). Key per-commit with `restore-keys` for the warm
+prefix hit, and disable a setup action's built-in cache (e.g.
+`actions/setup-go` with `cache: false`) so it doesn't freeze a stale entry under
+a lockfile-only key.
 
 ## A second org
 
