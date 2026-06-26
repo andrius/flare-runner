@@ -21,6 +21,12 @@
 
   // `wrangler deploy` builds ./Dockerfile (linux/amd64) and pushes it. class_name
   // must match the Durable Object class below. standard-2 = 1 vCPU / 6 GiB / 12 GB.
+  //
+  // max_instances must be >= the widest job matrix that queues at once, AND your
+  // Cloudflare account's concurrent-container limit caps real concurrency on top
+  // of this. A matrix wider than that limit starves its tail (one container per
+  // workflow_job:queued webhook, no re-trigger). Keep matrices <= the limit, or
+  // raise it. See setup.md "Concurrency and matrix size".
   "containers": [
     {
       "class_name": "RunnerContainer",
