@@ -1,5 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
-import { verifySignature, shouldSpawn, type WorkflowJobEvent } from "./webhook";
+import { verifySignature, shouldSpawn, shouldReap, type WorkflowJobEvent } from "./webhook";
 import { mintJitConfig, type Scope } from "./github";
 
 export interface Env {
@@ -21,13 +21,28 @@ export interface Env {
  */
 export class RunnerContainer extends Container<Env> {
   // ponytail: no defaultPort - this is the CF "batch/cron" container shape, not a
-  // server. sleepAfter is only a backstop; run.sh exits on its own after one job.
-  sleepAfter = "30s";
+  // server. Nothing is ever proxied to this container, so renewActivityTimeout()
+  // fires only at start: sleepAfter is a hard wall-clock cap on the whole job,
+  // NOT an idle timeout. Keep it above the longest job you expect (GitHub caps a
+  // job at 6h). It must never be short enough to kill a running job - the old
+  // "30s" would have done exactly that had the signal ever landed (see
+  // entrypoint.sh). This is the last-resort backstop; reap() below is the
+  // precise path.
+  sleepAfter = "6h";
 
   async runJob(jitConfig: string): Promise<void> {
     // Pass the JIT config via env; the image entrypoint runs
     //   ./run.sh --jitconfig "$JIT_CONFIG"
     await this.start({ envVars: { JIT_CONFIG: jitConfig }, enableInternet: true });
+  }
+
+  /**
+   * Tear the container down once GitHub says the job is over. A JIT runner that
+   * claimed a job exits on its own, but one that was never assigned a job
+   * long-polls forever and bills 6 GiB of memory the whole time.
+   */
+  async reap(): Promise<void> {
+    if (this.ctx.container?.running) await this.destroy();
   }
 }
 
@@ -59,8 +74,17 @@ export default {
       .map((s) => s.trim())
       .filter(Boolean);
     const body = JSON.parse(raw) as WorkflowJobEvent;
+    const event = request.headers.get("x-github-event");
 
-    if (!shouldSpawn(request.headers.get("x-github-event"), body, labels)) {
+    // The job ended (succeeded, failed, or was cancelled). Kill its container:
+    // if the runner never got the job, it is still long-polling and billing.
+    if (shouldReap(event, body, labels)) {
+      const name = `cf-${body.workflow_job.id}`;
+      await getContainer(env.RUNNER, name).reap();
+      return new Response(`reaped ${name}`, { status: 202 });
+    }
+
+    if (!shouldSpawn(event, body, labels)) {
       // 204 must have a null body (Workers runtime throws otherwise).
       return new Response(null, { status: 204 });
     }

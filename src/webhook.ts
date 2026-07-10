@@ -38,6 +38,12 @@ export interface WorkflowJobEvent {
   organization?: { login: string };
 }
 
+/** Are the job's labels a superset of the labels our runners advertise? */
+function labelsMatch(body: WorkflowJobEvent, requiredLabels: string[]): boolean {
+  const jobLabels = new Set((body.workflow_job?.labels ?? []).map((l) => l.toLowerCase()));
+  return requiredLabels.every((l) => jobLabels.has(l.toLowerCase()));
+}
+
 /**
  * Should this delivery spawn a runner? Only for a `workflow_job` that is
  * `queued` and whose labels are a superset of our required labels - so we never
@@ -50,6 +56,23 @@ export function shouldSpawn(
 ): boolean {
   if (eventHeader !== "workflow_job") return false;
   if (body.action !== "queued") return false;
-  const jobLabels = new Set((body.workflow_job?.labels ?? []).map((l) => l.toLowerCase()));
-  return requiredLabels.every((l) => jobLabels.has(l.toLowerCase()));
+  return labelsMatch(body, requiredLabels);
+}
+
+/**
+ * Should this delivery reap the container for the job? A JIT runner exits by
+ * itself once it has claimed and finished one job, but a runner that was never
+ * assigned a job (GitHub gave it to another runner, or the job was cancelled)
+ * long-polls forever. Container memory is billed on wall-clock, so such a
+ * container bills until something kills it. `workflow_job: completed` is the
+ * event that tells us the job is over, whatever its conclusion.
+ */
+export function shouldReap(
+  eventHeader: string | null,
+  body: WorkflowJobEvent,
+  requiredLabels: string[],
+): boolean {
+  if (eventHeader !== "workflow_job") return false;
+  if (body.action !== "completed") return false;
+  return labelsMatch(body, requiredLabels);
 }

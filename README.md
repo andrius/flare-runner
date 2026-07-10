@@ -12,11 +12,14 @@ flowchart LR
     C["GitHub API<br/>generate-jitconfig"]
     D["Cloudflare Container<br/>(ephemeral runner)"]
     E["run.sh --jitconfig:<br/>claim ONE job, run, exit, reclaim"]
+    F["GitHub Actions<br/>(workflow_job: completed)"]
     A -- "HMAC webhook" --> B
     B -- "mint JIT" --> C
     C -- "encoded_jit_config" --> B
     B -- "start one container" --> D
     D --> E
+    F -- "HMAC webhook" --> B
+    B -- "reap the container" --> D
 ```
 
 Three moving parts: a **Worker** (`src/index.ts`), a **Container Durable Object**
@@ -80,8 +83,36 @@ On the flare-runner Cloudflare Container itself:
 ## Cost note
 
 Cloudflare bills memory + disk for the whole time an instance runs (vCPU is
-compute-time). A JIT runner exits after one job, so it only bills for the job's
-duration. Watch for leaks with `wrangler containers list`.
+compute-time). A JIT runner that claims a job exits when the job ends, so it
+bills for the job's duration.
+
+A JIT runner that is **never assigned a job** does not exit. GitHub sends one
+`workflow_job:queued` per job, flare-runner starts one container per event, and
+if the job is cancelled or another runner claims it first, this runner keeps
+long-polling. Nothing about that is visible in the job list, and the container
+bills memory the entire time.
+
+Two guards, because a single one has failed in production:
+
+- **`shouldReap`** (`src/webhook.ts`) - `workflow_job:completed` tears the
+  container down as soon as GitHub says the job is over, whatever its
+  conclusion. This is the precise path; subscribe to Workflow job events and it
+  works with no extra configuration.
+- **`sleepAfter`** (`src/index.ts`) - a hard wall-clock cap on the container.
+  Nothing is ever proxied to a runner, so the SDK's activity timer only ticks at
+  start: this is a total-runtime ceiling, **not** an idle timeout. It must stay
+  above the longest job you expect (GitHub caps a job at 6h).
+
+Both ultimately depend on the container honouring SIGTERM. Cloudflare signals
+PID 1 and **never escalates to SIGKILL**, so `entrypoint.sh` runs the agent as a
+child, forwards the signal, and escalates itself. Do not turn that back into
+`exec ./run.sh` - bash will not forward SIGTERM to a foreground child, and the
+container becomes unkillable.
+
+Watch for leaks with `wrangler containers list`. To audit spend, group
+`containersUsageAdaptiveGroups` by `instanceId` in the GraphQL analytics API:
+`allocatedMemory` (byte-seconds) divided by the instance's memory gives each
+container's wall-clock lifetime, which makes a stuck runner obvious.
 
 ## License
 
