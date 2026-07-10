@@ -114,6 +114,31 @@ Watch for leaks with `wrangler containers list`. To audit spend, group
 `allocatedMemory` (byte-seconds) divided by the instance's memory gives each
 container's wall-clock lifetime, which makes a stuck runner obvious.
 
+### Sizing the instance
+
+Memory and disk are billed on what you **provision**, for the container's whole
+wall-clock life. vCPU is billed on what you actually **burn**. Two consequences:
+
+- **Trim memory, never vCPU.** Halving vCPU does not halve the CPU bill, because
+  the work does not shrink; it just takes twice as long, and the memory bill is
+  charged for that whole doubled time.
+- **The half-vCPU predefined types are a trap for CI.** Measured here, Actions
+  jobs run at 90-95% of one vCPU. On `standard-1` (1/2 vCPU, 4 GiB) wall-clock
+  roughly doubles, so `4 GiB x 2T` beats `6 GiB x T` and the bill goes *up*
+  around 15% while CI gets twice as slow.
+
+Hence the default is a custom instance type: a full vCPU with the memory cut to
+what a job actually needs.
+
+```jsonc
+"instance_type": { "vcpu": 1, "memory_mib": 4096, "disk_mb": 8000 }
+```
+
+Custom types require `vcpu >= 1` and are capped by `standard-4` (4 vCPU, 12 GiB,
+20 GB). The runner image is ~1.34 GB, so 8 GB of disk leaves roughly 6.6 GB for
+the checkout, package store, and any images your jobs build. Raise `disk_mb` if
+your jobs build large container images, and `memory_mib` if they OOM.
+
 ## License
 
 MIT - see [LICENSE](LICENSE).

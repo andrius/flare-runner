@@ -20,7 +20,16 @@
   },
 
   // `wrangler deploy` builds ./Dockerfile (linux/amd64) and pushes it. class_name
-  // must match the Durable Object class below. standard-2 = 1 vCPU / 6 GiB / 12 GB.
+  // must match the Durable Object class below.
+  //
+  // instance_type: memory and disk are billed on what you PROVISION, for the whole
+  // wall-clock life of the container; vCPU is billed on what you actually BURN. So
+  // trim memory, never vCPU. Dropping to a predefined half-vCPU type (standard-1)
+  // is a trap: CI jobs here run at 90-95% of one vCPU, so wall-clock roughly
+  // doubles and the memory bill grows with it. A custom type keeps the full vCPU
+  // and cuts only the provisioned memory. 4 GiB fits an Actions job with the
+  // 1.34 GB image; raise memory_mib if your jobs OOM, or disk_mb if you build
+  // large images. Custom types need vcpu >= 1.
   //
   // max_instances must be >= the widest job matrix that queues at once, AND your
   // Cloudflare account's concurrent-container limit caps real concurrency on top
@@ -32,7 +41,7 @@
       "class_name": "RunnerContainer",
       "image": "./Dockerfile",
       "max_instances": 5,
-      "instance_type": "standard-2"
+      "instance_type": { "vcpu": 1, "memory_mib": 4096, "disk_mb": 8000 }
     }
   ],
   "durable_objects": {
