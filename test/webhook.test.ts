@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifySignature, shouldSpawn, type WorkflowJobEvent } from "../src/webhook";
+import { verifySignature, shouldSpawn, shouldReap, type WorkflowJobEvent } from "../src/webhook";
 
 // Helper: produce a valid GitHub-style sha256 signature header for a body.
 async function sign(secret: string, body: string): Promise<string> {
@@ -66,5 +66,36 @@ describe("shouldSpawn", () => {
   it("ignores other event types (e.g. ping, push)", () => {
     expect(shouldSpawn("ping", event("queued", required), required)).toBe(false);
     expect(shouldSpawn(null, event("queued", required), required)).toBe(false);
+  });
+});
+
+describe("shouldReap", () => {
+  const required = ["self-hosted", "cloudflare"];
+  const event = (action: string, labels: string[]): WorkflowJobEvent => ({
+    action,
+    workflow_job: { id: 1, run_id: 1, labels },
+    repository: { full_name: "acme/app" },
+  });
+
+  it("reaps a completed workflow_job whose labels cover the required set", () => {
+    expect(shouldReap("workflow_job", event("completed", ["self-hosted", "cloudflare", "x64"]), required)).toBe(true);
+  });
+
+  it("is case-insensitive on labels", () => {
+    expect(shouldReap("workflow_job", event("completed", ["Self-Hosted", "Cloudflare"]), required)).toBe(true);
+  });
+
+  it("leaves a still-running job alone", () => {
+    expect(shouldReap("workflow_job", event("queued", required), required)).toBe(false);
+    expect(shouldReap("workflow_job", event("in_progress", required), required)).toBe(false);
+  });
+
+  it("ignores jobs missing a required label", () => {
+    expect(shouldReap("workflow_job", event("completed", ["self-hosted"]), required)).toBe(false);
+  });
+
+  it("ignores other event types (e.g. ping, push)", () => {
+    expect(shouldReap("ping", event("completed", required), required)).toBe(false);
+    expect(shouldReap(null, event("completed", required), required)).toBe(false);
   });
 });
