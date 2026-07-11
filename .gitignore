@@ -4,6 +4,9 @@ node_modules/
 dist/
 *.log
 
-# Private per-org deploy configs (contain org names; not for the public template)
+# Private per-org deploy configs (contain org names; not for the public template).
+# They live in .workspace/ and are symlinked into the working tree, so they
+# survive branch switches and are shared by every worktree.
+.workspace/
 wrangler.*.jsonc
 
