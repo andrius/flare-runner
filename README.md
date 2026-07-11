@@ -22,9 +22,10 @@ flowchart LR
     B -- "reap the container" --> D
 ```
 
-Three moving parts: a **Worker** (`src/index.ts`), a **Container Durable Object**
-(`RunnerContainer`), and a **runner image** (`Dockerfile`). Deploy one instance
-per GitHub org.
+Three moving parts: a **Worker** (`src/index.ts`), two **Container Durable Objects**
+(`RunnerContainerGo` and `RunnerContainerNode` - same image, different
+`instance_type`; see "Go and node classes" below), and a **runner image**
+(`Dockerfile`). Deploy one instance per GitHub org.
 
 ## Why
 
@@ -138,6 +139,21 @@ Custom types require `vcpu >= 1` and are capped by `standard-4` (4 vCPU, 12 GiB,
 20 GB). The runner image is ~1.34 GB, so 8 GB of disk leaves roughly 6.6 GB for
 the checkout, package store, and any images your jobs build. Raise `disk_mb` if
 your jobs build large container images, and `memory_mib` if they OOM.
+
+### Go and node classes
+
+Each wrangler config declares two container classes, `RunnerContainerGo` and
+`RunnerContainerNode`, bound to `RUNNER_GO` and `RUNNER_NODE`. A job labelled
+`[self-hosted, cloudflare, node]` runs on the node class; `[..., go]` or a bare
+`[self-hosted, cloudflare]` (no discriminator) runs on the go class. The go
+class is the default, so size it for your heaviest job.
+
+Both classes run the same image and differ only in `instance_type` - nothing
+else about them diverges. The spawned runner advertises the discriminator label
+back to GitHub alongside the base labels, because GitHub only assigns a job to
+a runner whose labels are a superset of the job's `runs-on`; without that, a
+`node`-labelled job would never match a runner that only claims
+`self-hosted,cloudflare`.
 
 ## License
 

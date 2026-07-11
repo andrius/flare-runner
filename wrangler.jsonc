@@ -20,7 +20,7 @@
   },
 
   // `wrangler deploy` builds ./Dockerfile (linux/amd64) and pushes it. class_name
-  // must match the Durable Object class below.
+  // must match one of the Durable Object classes below.
   //
   // instance_type: memory and disk are billed on what you PROVISION, for the whole
   // wall-clock life of the container; vCPU is billed on what you actually BURN. So
@@ -36,18 +36,38 @@
   // of this. A matrix wider than that limit starves its tail (one container per
   // workflow_job:queued webhook, no re-trigger). Keep matrices <= the limit, or
   // raise it. See setup.md "Concurrency and matrix size".
+  //
+  // Both classes at one size - this demo repo's own CI carries no go/node label,
+  // so jobs route to the go class; the node class exists only to satisfy the
+  // shared Worker shape (raise memory_mib per class if you fork this).
   "containers": [
     {
-      "class_name": "RunnerContainer",
+      "class_name": "RunnerContainerGo",
+      "image": "./Dockerfile",
+      "max_instances": 5,
+      "instance_type": { "vcpu": 1, "memory_mib": 4096, "disk_mb": 8000 }
+    },
+    {
+      "class_name": "RunnerContainerNode",
       "image": "./Dockerfile",
       "max_instances": 5,
       "instance_type": { "vcpu": 1, "memory_mib": 4096, "disk_mb": 8000 }
     }
   ],
   "durable_objects": {
-    "bindings": [{ "class_name": "RunnerContainer", "name": "RUNNER" }]
+    "bindings": [
+      { "class_name": "RunnerContainerGo", "name": "RUNNER_GO" },
+      { "class_name": "RunnerContainerNode", "name": "RUNNER_NODE" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RunnerContainer"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RunnerContainer"] },
+    {
+      "tag": "v2",
+      "renamed_classes": [{ "from": "RunnerContainer", "to": "RunnerContainerGo" }],
+      "new_sqlite_classes": ["RunnerContainerNode"]
+    }
+  ]
 
   // Per-org reuse: copy this file, change `name` + `GITHUB_ORG` (+ RUNNER_GROUP_ID),
   // or add an "env": { "another-org": { ... } } block and deploy with `--env`.

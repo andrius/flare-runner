@@ -38,9 +38,14 @@ export interface WorkflowJobEvent {
   organization?: { login: string };
 }
 
+/** The job's labels, lowercased, as a set. Missing labels are an empty set, never a throw. */
+function jobLabelSet(body: WorkflowJobEvent): Set<string> {
+  return new Set((body.workflow_job?.labels ?? []).map((l) => l.toLowerCase()));
+}
+
 /** Are the job's labels a superset of the labels our runners advertise? */
 function labelsMatch(body: WorkflowJobEvent, requiredLabels: string[]): boolean {
-  const jobLabels = new Set((body.workflow_job?.labels ?? []).map((l) => l.toLowerCase()));
+  const jobLabels = jobLabelSet(body);
   return requiredLabels.every((l) => jobLabels.has(l.toLowerCase()));
 }
 
@@ -75,4 +80,34 @@ export function shouldReap(
   if (eventHeader !== "workflow_job") return false;
   if (body.action !== "completed") return false;
   return labelsMatch(body, requiredLabels);
+}
+
+export type RunnerClass = "go" | "node";
+
+/** The discriminator label a job carried, or null for a bare job. `node` wins over `go`. */
+function discriminator(body: WorkflowJobEvent): "go" | "node" | null {
+  const jobLabels = jobLabelSet(body);
+  if (jobLabels.has("node")) return "node";
+  if (jobLabels.has("go")) return "go";
+  return null;
+}
+
+/**
+ * Which container class serves this job. `node` -> the node class; everything
+ * else (explicit `go`, a bare job, missing labels) -> the go class, which is the
+ * default so existing bare-label consumers keep working.
+ */
+export function runnerClassFor(body: WorkflowJobEvent): RunnerClass {
+  return discriminator(body) === "node" ? "node" : "go";
+}
+
+/**
+ * The labels the spawned JIT runner must advertise. GitHub assigns a job to a
+ * runner only when the runner's labels are a superset of the job's runs-on, so a
+ * `[... , node]` job needs a runner advertising `node`. Bare jobs advertise the
+ * base set unchanged.
+ */
+export function advertisedLabels(body: WorkflowJobEvent, baseLabels: string[]): string[] {
+  const disc = discriminator(body);
+  return disc ? [...baseLabels, disc] : [...baseLabels];
 }
