@@ -139,6 +139,21 @@ Custom types require `vcpu >= 1` and are capped by `standard-4` (4 vCPU, 12 GiB,
 the checkout, package store, and any images your jobs build. Raise `disk_mb` if
 your jobs build large container images, and `memory_mib` if they OOM.
 
+### Go and node classes
+
+Each wrangler config declares two container classes, `RunnerContainerGo` and
+`RunnerContainerNode`, bound to `RUNNER_GO` and `RUNNER_NODE`. A job labelled
+`[self-hosted, cloudflare, node]` runs on the node class; `[..., go]` or a bare
+`[self-hosted, cloudflare]` (no discriminator) runs on the go class. The go
+class is the default, so size it for your heaviest job.
+
+Both classes run the same image and differ only in `instance_type` - nothing
+else about them diverges. The spawned runner advertises the discriminator label
+back to GitHub alongside the base labels, because GitHub only assigns a job to
+a runner whose labels are a superset of the job's `runs-on`; without that, a
+`node`-labelled job would never match a runner that only claims
+`self-hosted,cloudflare`.
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
