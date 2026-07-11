@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { verifySignature, shouldSpawn, shouldReap, type WorkflowJobEvent } from "../src/webhook";
+import { runnerClassFor, advertisedLabels } from "../src/webhook";
 
 // Helper: produce a valid GitHub-style sha256 signature header for a body.
 async function sign(secret: string, body: string): Promise<string> {
@@ -97,5 +98,65 @@ describe("shouldReap", () => {
   it("ignores other event types (e.g. ping, push)", () => {
     expect(shouldReap("ping", event("completed", required), required)).toBe(false);
     expect(shouldReap(null, event("completed", required), required)).toBe(false);
+  });
+});
+
+function job(labels: string[]): WorkflowJobEvent {
+  return {
+    action: "queued",
+    workflow_job: { id: 1, run_id: 1, labels },
+    repository: { full_name: "o/r" },
+  };
+}
+
+describe("runnerClassFor", () => {
+  it("routes a node-labelled job to the node class", () => {
+    expect(runnerClassFor(job(["self-hosted", "cloudflare", "node"]))).toBe("node");
+  });
+
+  it("routes a go-labelled job to the go class", () => {
+    expect(runnerClassFor(job(["self-hosted", "cloudflare", "go"]))).toBe("go");
+  });
+
+  it("routes a bare job to the go class by default", () => {
+    expect(runnerClassFor(job(["self-hosted", "cloudflare"]))).toBe("go");
+  });
+
+  it("routes a job with no labels to the go class", () => {
+    expect(runnerClassFor({ action: "queued", workflow_job: { id: 1, run_id: 1, labels: undefined as unknown as string[] }, repository: { full_name: "o/r" } })).toBe("go");
+  });
+
+  it("lets node win when a job carries both discriminators", () => {
+    expect(runnerClassFor(job(["self-hosted", "cloudflare", "go", "node"]))).toBe("node");
+  });
+
+  it("matches the discriminator case-insensitively", () => {
+    expect(runnerClassFor(job(["self-hosted", "cloudflare", "Node"]))).toBe("node");
+  });
+});
+
+describe("advertisedLabels", () => {
+  const base = ["self-hosted", "cloudflare"];
+
+  it("appends node for a node job", () => {
+    expect(advertisedLabels(job(["self-hosted", "cloudflare", "node"]), base)).toEqual(["self-hosted", "cloudflare", "node"]);
+  });
+
+  it("appends go for a go job", () => {
+    expect(advertisedLabels(job(["self-hosted", "cloudflare", "go"]), base)).toEqual(["self-hosted", "cloudflare", "go"]);
+  });
+
+  it("leaves a bare job's labels as the base set", () => {
+    expect(advertisedLabels(job(["self-hosted", "cloudflare"]), base)).toEqual(["self-hosted", "cloudflare"]);
+  });
+
+  it("lowercases the appended discriminator", () => {
+    expect(advertisedLabels(job(["self-hosted", "cloudflare", "GO"]), base)).toEqual(["self-hosted", "cloudflare", "go"]);
+  });
+
+  it("does not mutate the caller's baseLabels", () => {
+    const base = ["self-hosted", "cloudflare"];
+    advertisedLabels(job(["self-hosted", "cloudflare", "node"]), base);
+    expect(base).toEqual(["self-hosted", "cloudflare"]);
   });
 });
