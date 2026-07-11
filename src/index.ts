@@ -1,14 +1,22 @@
 import { Container, getContainer } from "@cloudflare/containers";
-import { verifySignature, shouldSpawn, shouldReap, type WorkflowJobEvent } from "./webhook";
+import {
+  verifySignature,
+  shouldSpawn,
+  shouldReap,
+  runnerClassFor,
+  advertisedLabels,
+  type WorkflowJobEvent,
+} from "./webhook";
 import { mintJitConfig, type Scope } from "./github";
 
 export interface Env {
-  RUNNER: DurableObjectNamespace<RunnerContainer>;
+  RUNNER_GO: DurableObjectNamespace<RunnerContainerGo>;
+  RUNNER_NODE: DurableObjectNamespace<RunnerContainerNode>;
   // vars - set exactly one of GITHUB_REPO ("owner/repo") or GITHUB_ORG ("org").
   GITHUB_REPO?: string;
   GITHUB_ORG?: string;
   RUNNER_GROUP_ID: string; // numeric id; "1" is the Default group
-  RUNNER_LABELS: string; // comma-separated, e.g. "self-hosted,cloudflare"
+  RUNNER_LABELS: string; // comma-separated base labels, e.g. "self-hosted,cloudflare"
   // secrets
   GITHUB_TOKEN: string; // PAT (POC) / installation token (later)
   WEBHOOK_SECRET: string;
@@ -18,8 +26,11 @@ export interface Env {
  * One ephemeral GitHub Actions runner per job. No port: the runner is an
  * outbound long-poll client, not an HTTP server. It boots in JIT mode, claims a
  * single job, then exits - Cloudflare reclaims the instance.
+ *
+ * Two concrete subclasses exist so a single Worker can offer two instance sizes
+ * (see the wrangler configs); their behaviour is identical.
  */
-export class RunnerContainer extends Container<Env> {
+class RunnerContainerBase extends Container<Env> {
   // ponytail: no defaultPort - this is the CF "batch/cron" container shape, not a
   // server. Nothing is ever proxied to this container, so renewActivityTimeout()
   // fires only at start: sleepAfter is a hard wall-clock cap on the whole job,
@@ -39,11 +50,18 @@ export class RunnerContainer extends Container<Env> {
   /**
    * Tear the container down once GitHub says the job is over. A JIT runner that
    * claimed a job exits on its own, but one that was never assigned a job
-   * long-polls forever and bills 6 GiB of memory the whole time.
+   * long-polls forever and bills its memory the whole time.
    */
   async reap(): Promise<void> {
     if (this.ctx.container?.running) await this.destroy();
   }
+}
+
+export class RunnerContainerGo extends RunnerContainerBase {}
+export class RunnerContainerNode extends RunnerContainerBase {}
+
+function namespaceForJob(env: Env, body: WorkflowJobEvent): DurableObjectNamespace<RunnerContainerBase> {
+  return runnerClassFor(body) === "node" ? env.RUNNER_NODE : env.RUNNER_GO;
 }
 
 function scopeFromEnv(env: Env): Scope {
@@ -76,11 +94,11 @@ export default {
     const body = JSON.parse(raw) as WorkflowJobEvent;
     const event = request.headers.get("x-github-event");
 
-    // The job ended (succeeded, failed, or was cancelled). Kill its container:
-    // if the runner never got the job, it is still long-polling and billing.
+    // The job ended (succeeded, failed, or was cancelled). Kill its container in
+    // the class it was spawned in: reaping the wrong namespace leaks the container.
     if (shouldReap(event, body, labels)) {
       const name = `cf-${body.workflow_job.id}`;
-      await getContainer(env.RUNNER, name).reap();
+      await getContainer(namespaceForJob(env, body), name).reap();
       return new Response(`reaped ${name}`, { status: 202 });
     }
 
@@ -95,12 +113,12 @@ export default {
     const jit = await mintJitConfig({
       scope: scopeFromEnv(env),
       runnerGroupId: Number(env.RUNNER_GROUP_ID || "1"),
-      labels,
+      labels: advertisedLabels(body, labels),
       name,
       token: env.GITHUB_TOKEN,
     });
 
-    await getContainer(env.RUNNER, name).runJob(jit);
+    await getContainer(namespaceForJob(env, body), name).runJob(jit);
     return new Response(`spawned ${name}`, { status: 202 });
   },
 } satisfies ExportedHandler<Env>;
