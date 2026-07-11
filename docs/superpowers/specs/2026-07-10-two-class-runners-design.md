@@ -45,7 +45,13 @@ So the spawned runner must advertise the discriminator too. The labels passed to
 - discriminator present -> `RUNNER_LABELS + [discriminator]`
 - bare job -> `RUNNER_LABELS` (unchanged from today)
 
-A consequence to record, not to fight: label matching is superset-based, so a runner advertising `[self-hosted, cloudflare, node]` *could* be assigned a bare `[self-hosted, cloudflare]` job if one is queued when it comes online (JIT runners claim a matching job, not necessarily their originating one). The only effect is a bare job occasionally running on the 4 GiB node class instead of the 6 GiB go class. Both classes run the identical image; this is a sizing nicety, not a correctness bug. Left as-is.
+A consequence to record, and it is worse than a sizing nicety: label matching is superset-based, so a runner advertising `[self-hosted, cloudflare, node]` *can* be assigned a bare `[self-hosted, cloudflare]` job if one is queued when it comes online (a JIT runner claims a matching job, not necessarily its originating one).
+
+Follow that through. Node runner `N` is spawned for node job `J`, but claims bare job `B` instead. `B` also had a go container spawned for it, and that container **cannot** take `J` - it does not advertise `node`. So `J` has no runner and sits queued until GitHub's queue timeout. Nothing leaks: `N` exits after finishing `B`, and the go container spawned for `B` is reaped by `B`'s `completed` event. But a job stalls.
+
+Impact today is exactly zero, because no `node`-labelled job exists in either org, so no node container is ever spawned. It becomes real the moment a repo runs node-labelled and bare-labelled jobs concurrently in the same org - which is precisely what the `pbx` split will do (`test-go` + `test-node` in parallel, alongside `mandatory-gates`). Watch the first parallel run.
+
+The clean fix, if it bites: give every self-hosted job an explicit discriminator so no bare-label job remains for a node runner to steal. That is a one-line `runs-on` change per job in the consuming repo, not a change here. Do not preemptively build a claim-fencing mechanism in the Worker; GitHub offers no API to bind a JIT runner to a specific job.
 
 ### The two classes
 

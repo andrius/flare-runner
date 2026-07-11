@@ -22,9 +22,10 @@ flowchart LR
     B -- "reap the container" --> D
 ```
 
-Three moving parts: a **Worker** (`src/index.ts`), a **Container Durable Object**
-(`RunnerContainer`), and a **runner image** (`Dockerfile`). Deploy one instance
-per GitHub org.
+Three moving parts: a **Worker** (`src/index.ts`), two **Container Durable Objects**
+(`RunnerContainerGo` and `RunnerContainerNode` - same image, different
+`instance_type`; see "Go and node classes" below), and a **runner image**
+(`Dockerfile`). Deploy one instance per GitHub org.
 
 ## Why
 
