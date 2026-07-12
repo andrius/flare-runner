@@ -155,6 +155,21 @@ a runner whose labels are a superset of the job's `runs-on`; without that, a
 `node`-labelled job would never match a runner that only claims
 `self-hosted,cloudflare`.
 
+**Renaming a container class needs the application deleted first.** A container
+application is keyed to the Durable Object namespace and named after the class
+when it is created; a `renamed_classes` migration does not rename it. Wrangler
+then tries to create a second application for a namespace that already has one
+and the deploy fails with `DURABLE_OBJECT_ALREADY_HAS_APPLICATION` - **after**
+the migration has already applied, leaving the Worker depending on a class its
+live script does not export. So, with CI idle and no job in flight:
+
+```bash
+npx wrangler containers list          # find the stale <worker>-<oldclass> app id
+npx wrangler containers delete <id>   # runners are stateless one-shots
+npx wrangler deploy                   # recreates one application per class
+npx wrangler containers list          # verify: one app per class, not the old name
+```
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
