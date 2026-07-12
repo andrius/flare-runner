@@ -102,6 +102,27 @@ Deployed instances carry migration `v1: new_sqlite_classes: [RunnerContainer]`. 
 
 `v1` stays for instances that never migrated. This is a live migration on three deployed Workers; it must be applied by redeploying each, and verified against the API the same way instance-type changes are (`wrangler`'s `SUCCESS` line is not proof - poll the applied config).
 
+**The rename alone does not deploy.** Applied 2026-07-11 and learned the hard way: a container application is keyed to the Durable Object namespace and **named after the class at creation time**. Renaming the class does not rename its application, so wrangler tries to create a second application (`<worker>-runnercontainergo`) for a namespace that already owns `<worker>-runnercontainer`, and the deploy dies with:
+
+```
+Error creating application due to a misconfiguration:
+  DURABLE_OBJECT_ALREADY_HAS_APPLICATION
+  name flare-runner-runnercontainer
+```
+
+Worse, **that failure is not atomic**: the migration and the new script version are already applied by the time application creation fails. The Worker is then left depending on a class its previous script never exported, and the *next* deploy fails differently (`New version of script does not export class 'RunnerContainerGo' ... [code: 10064]`). Do not read an unchanged application list as "nothing happened" - check the Durable Object class, not the app names.
+
+The working procedure, per Worker, with CI idle:
+
+```bash
+npx wrangler containers list                    # find the <worker>-runnercontainer app id
+npx wrangler containers delete <id>             # ephemeral runners: no state to lose
+npx wrangler deploy --config wrangler.<org>.jsonc
+npx wrangler containers list                    # expect -runnercontainergo AND -runnercontainernode
+```
+
+Deleting the application is safe *only* because these containers are stateless one-shot runners and no job is in flight. Deleting it under a running job kills that job.
+
 ## Error handling
 
 - A job whose labels pass the base gate but carry neither `go` nor `node` is not an error: it routes to Go by definition.
