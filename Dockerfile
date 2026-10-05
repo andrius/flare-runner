@@ -3,7 +3,7 @@
 # single job, then the process exits and Cloudflare reclaims the instance.
 FROM --platform=linux/amd64 ubuntu:24.04
 
-ARG RUNNER_VERSION=2.335.1
+ARG RUNNER_VERSION=2.337.0
 ENV DEBIAN_FRONTEND=noninteractive
 
 # UTF-8 locale so Unicode-aware tooling behaves the same as on GitHub-hosted
